@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROFILE_DIR="/Users/karimabilgaziyev/.hermes/profiles/neuromancer"
+PYTHON_BIN="/Users/karimabilgaziyev/.hermes/hermes-agent/venv/bin/python"
+
+cd "$PROFILE_DIR"
+export HERMES_HOME="${HERMES_HOME:-$PROFILE_DIR}"
+exec "$PYTHON_BIN" -m neuromancer_bot "$@"

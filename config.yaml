@@ -10,11 +10,8 @@ agent:
   disabled_toolsets:
     - bfl
     - browser
-    - clarify
     - code_execution
     - computer_use
-    - context_engine
-    - cronjob
     - delegation
     - desktop_ui
     - discord
@@ -22,21 +19,15 @@ agent:
     - feishu_doc
     - feishu_drive
     - homeassistant
-    - image_gen
     - kanban
-    - memory
     - project
     - search
-    - session_search
-    - skills
     - spotify
     - stt
     - todo
     - tts
     - video
     - video_gen
-    - vision
-    - web
     - x_search
     - yuanbao
   verbose: false
@@ -85,6 +76,10 @@ compression:
   idle_compact_after_seconds: 0
 prompt_caching:
   cache_ttl: 5m
+auxiliary:
+  vision:
+    provider: openrouter
+    model: google/gemini-2.5-flash
 display:
   compact: false
   busy_input_mode: interrupt
@@ -117,6 +112,11 @@ delegation:
   max_iterations: 50
 skills:
   creation_nudge_interval: 15
+telegram:
+  allowed_chats: '-1003279704534'
+  group_allowed_chats: '-1003279704534'
+  observe_unmentioned_group_messages: true
+  require_mention: true
 code_execution:
   timeout: 300
   max_tool_calls: 50
@@ -140,10 +140,25 @@ session_reset:
 group_sessions_per_user: true
 platform_toolsets:
   cli:
-    - file
-    - terminal
+    - clarify
+    - context_engine
+    - cronjob
+    - image_gen
+    - memory
+    - session_search
+    - skills
+    - vision
+    - web
   telegram:
-    - hermes-telegram
+    - clarify
+    - context_engine
+    - cronjob
+    - image_gen
+    - memory
+    - session_search
+    - skills
+    - vision
+    - web
   discord:
     - hermes-discord
   whatsapp:
@@ -164,6 +179,75 @@ platform_toolsets:
     - hermes-google_chat
 smart_model_routing:
   enabled: false
+plugins:
+  enabled: []
+  disabled:
+    - neuromancer-memory
+  entries:
+    neuromancer-memory:
+      allow_tool_override: false
+known_plugin_toolsets:
+  telegram:
+    - spotify
+  cli:
+    - spotify
+known_builtin_toolsets:
+  telegram:
+    - bfl
+    - browser
+    - clarify
+    - code_execution
+    - computer_use
+    - context_engine
+    - cronjob
+    - delegation
+    - discord
+    - discord_admin
+    - file
+    - homeassistant
+    - image_gen
+    - memory
+    - session_search
+    - skills
+    - spotify
+    - stt
+    - terminal
+    - todo
+    - tts
+    - video
+    - video_gen
+    - vision
+    - web
+    - x_search
+    - yuanbao
+  cli:
+    - bfl
+    - browser
+    - clarify
+    - code_execution
+    - computer_use
+    - context_engine
+    - cronjob
+    - delegation
+    - discord
+    - discord_admin
+    - file
+    - homeassistant
+    - image_gen
+    - memory
+    - session_search
+    - skills
+    - spotify
+    - stt
+    - terminal
+    - todo
+    - tts
+    - video
+    - video_gen
+    - vision
+    - web
+    - x_search
+    - yuanbao
 
 # ── Security ──────────────────────────────────────────────────────────
 # Secret redaction is ON by default — strings that look like API keys,

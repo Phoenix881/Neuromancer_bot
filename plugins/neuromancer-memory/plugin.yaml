@@ -1,0 +1,7 @@
+name: neuromancer-memory
+version: 0.1.0
+description: "Record Neuromancer Telegram group traffic into neuromancer_memory.db without exposing lore/profile mutation tools."
+author: "Karim + Codex"
+kind: standalone
+hooks:
+  - pre_gateway_dispatch

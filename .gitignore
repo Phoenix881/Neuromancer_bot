@@ -17,3 +17,24 @@ backups/
 
 *.log
 .DS_Store
+__pycache__/
+*.pyc
+
+oldbot.md
+result.json
+ChatExport_*/
+*.db
+*.db-wal
+*.db-shm
+media/incoming/
+bin/tirith
+provider_models_cache.json
+ollama_cloud_models_cache.json
+.clean_shutdown
+channel_directory.json
+gateway.lock
+gateway-starts.log
+cron/
+state/
+pending_messages/
+platforms/

@@ -1,0 +1,36 @@
+{
+  "assets": [
+    {
+      "id": "nuclear_shut_up_dog",
+      "path": "media/images/завали_ебало.jpg",
+      "type": "photo",
+      "description": "Мем со собакой которая говорит \"Завали ебало\". Тон изображения абсурдный, но смысловой посыл читается как \"все, хватит разговаривать\".",
+      "use_when": [
+        "Тебя попросили прекратить общаться со втором ботом",
+        "Тебя explicitly попросили отправить эту реакцию"
+      ],
+      "avoid_when": [
+        "avoid it unless its one of the use cases above",
+        "avoid it when you think tone of the conversation is not suited"
+      ],
+      "send_mode": "with_optional_text"
+    },
+    {
+      "id": "tough_silence_bitch_dog",
+      "path": "media/images/тише_сучка.jpg",
+      "type": "photo",
+      "description": "Мем со собакой которая говорит \"Тише сучка\". Тон изображения абсурдный, но смысловой посыл читается как \"все, все, я тебя услышал\". Тон юмористический, идеален как roast.",
+      "use_when": [
+        "Кто то начинает использовать слишком много токенов на пустой обмен оскорблениями с тобой",
+        "Тебя explicitly попросили отправить эту реакцию"
+      ],
+      "avoid_when": [
+        "serious emotional message",
+        "actual help request",
+        "usually avoid it unless its one of the use cases above",
+        "you already sent it in the last 50 messages"
+      ],
+      "send_mode": "with_optional_text"
+    }
+  ]
+}
