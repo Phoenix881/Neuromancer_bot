@@ -1,0 +1,7 @@
+name: neuromancer-web-extract
+version: 0.1.0
+description: "Local readable-text extraction for DuckDuckGo search results."
+author: "Karim + Codex"
+kind: backend
+provides_web_providers:
+  - neuromancer-readable

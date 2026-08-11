@@ -28,8 +28,11 @@ ChatExport_*/
 *.db-shm
 media/incoming/
 bin/tirith
+bin/uv
+bin/uvx
 provider_models_cache.json
 ollama_cloud_models_cache.json
+.skills_prompt_snapshot.json
 .clean_shutdown
 channel_directory.json
 gateway.lock
@@ -38,3 +41,6 @@ cron/
 state/
 pending_messages/
 platforms/
+skills/.hub/
+skills/.usage.json
+skills/.usage.json.lock

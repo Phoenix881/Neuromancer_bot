@@ -44,6 +44,11 @@ terminal:
   container_persistent: true
   docker_mount_cwd_to_workspace: false
   lifetime_seconds: 300
+web:
+  backend: ddgs
+  search_backend: ddgs
+  extract_backend: neuromancer-readable
+  use_gateway: false
 browser:
   inactivity_timeout: 120
 tool_loop_guardrails:
@@ -79,7 +84,7 @@ prompt_caching:
 auxiliary:
   vision:
     provider: openrouter
-    model: google/gemini-2.5-flash
+    model: xiaomi/mimo-v2.5
 display:
   compact: false
   busy_input_mode: interrupt
@@ -180,7 +185,8 @@ platform_toolsets:
 smart_model_routing:
   enabled: false
 plugins:
-  enabled: []
+  enabled:
+    - neuromancer-web-extract
   disabled:
     - neuromancer-memory
   entries:

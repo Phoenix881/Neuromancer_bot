@@ -37,8 +37,10 @@ Python is the only intended Telegram consumer. The Hermes Telegram gateway shoul
 - `bin/neuromancer-bot`: Convenience launcher for the Python bot.
 - `media/index.json`: curated fixed media reactions Hermes may choose by id.
 - `scripts/import_telegram_export.py`: One-time/import utility for Telegram Desktop JSON exports.
+- `scripts/extract_web_context.py`: Local readable-text extractor for URLs found by web search.
 - `docs/traditional-python-bot.md`: Short operational notes for this runtime.
 - `plugins/neuromancer-memory/`: Earlier Hermes plugin experiment. It is kept as reference but disabled.
+- `plugins/neuromancer-web-extract/`: Hermes web extraction provider/tool for DuckDuckGo search results.
 
 ## Memory Database
 
@@ -112,6 +114,32 @@ Hermes returns a JSON envelope:
 If a curated reaction image fits, `media_id` may be one approved id from `media/index.json`. Python validates the id before sending anything. Hermes does not get to send arbitrary file paths.
 
 Because Hermes runs inside this profile, it still has the configured OpenRouter model and enabled tools. Telegram transport is no longer handled by Hermes.
+
+## Web Search
+
+Hermes web search is configured to use DuckDuckGo through the `ddgs` backend:
+
+```yaml
+web:
+  backend: ddgs
+  search_backend: ddgs
+  extract_backend: neuromancer-readable
+```
+
+DuckDuckGo search returns titles, URLs, and snippets. The local `neuromancer-web-extract` plugin turns selected result URLs into readable page text so Neuromancer can answer from the actual source instead of only the search snippet.
+
+The plugin exposes two paths:
+
+- normal Hermes `web_extract`, routed through the `neuromancer-readable` provider
+- direct `web_extract_readable`, registered in the existing `web` toolset as a clear fallback after `web_search`
+
+The extractor handles public HTML, text, markdown, XML, and JSON pages. It blocks non-HTTP(S), embedded credentials, credential-like query parameters, private/internal hosts, and URLs blocked by Hermes website policy. It does not handle PDFs or JavaScript-only pages.
+
+Manual test:
+
+```bash
+python3 scripts/extract_web_context.py https://example.com
+```
 
 ## Incoming Vision
 
