@@ -37,9 +37,11 @@ Python is the only intended Telegram consumer. The Hermes Telegram gateway shoul
 - `bin/neuromancer-bot`: Convenience launcher for the Python bot.
 - `media/index.json`: curated fixed media reactions Hermes may choose by id.
 - `scripts/import_telegram_export.py`: One-time/import utility for Telegram Desktop JSON exports.
+- `scripts/search_memory.py`: Read-only CLI for searching stored Telegram messages.
 - `scripts/extract_web_context.py`: Local readable-text extractor for URLs found by web search.
 - `docs/traditional-python-bot.md`: Short operational notes for this runtime.
 - `plugins/neuromancer-memory/`: Earlier Hermes plugin experiment. It is kept as reference but disabled.
+- `plugins/neuromancer-db-search/`: Read-only Hermes tools for searching `messages_raw` and `messages_fts`.
 - `plugins/neuromancer-web-extract/`: Hermes web extraction provider/tool for DuckDuckGo search results.
 
 ## Memory Database
@@ -72,6 +74,21 @@ Live-owned fields:
 - `members.last_seen_at`
 - `members.message_count`
 - `member_aliases` with source `live`
+
+## Database Search Tools
+
+Hermes can search old group messages through the enabled `neuromancer-db-search` plugin. These tools are read-only and live in the existing `memory` toolset:
+
+- `neuromancer_memory_search`: search `messages_fts` or exact substrings in `messages_raw`, with optional sender/date filters.
+- `neuromancer_message_context`: fetch one Telegram/raw message id plus nearby messages.
+- `neuromancer_user_messages`: fetch recent messages from a specific Telegram user id.
+
+Manual test:
+
+```bash
+python3 scripts/search_memory.py search "exact words here" --mode exact --limit 5
+python3 scripts/search_memory.py context tg:8122 --window 5
+```
 
 ## Trigger Behavior
 

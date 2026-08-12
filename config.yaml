@@ -186,6 +186,7 @@ smart_model_routing:
   enabled: false
 plugins:
   enabled:
+    - neuromancer-db-search
     - neuromancer-web-extract
   disabled:
     - neuromancer-memory

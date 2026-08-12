@@ -1,0 +1,5 @@
+name: neuromancer-db-search
+version: 0.1.0
+description: "Read-only search tools for Neuromancer's SQLite Telegram message memory."
+author: "Karim + Codex"
+kind: standalone
