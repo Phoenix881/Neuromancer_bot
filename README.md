@@ -125,10 +125,15 @@ The constructed prompt includes:
 Hermes returns a JSON envelope:
 
 ```json
-{"reply_text":"telegram reply text","media_id":null}
+{"reply_text":"telegram reply text","media_id":null,"delivery":"reply"}
 ```
 
 If a curated reaction image fits, `media_id` may be one approved id from `media/index.json`. Python validates the id before sending anything. Hermes does not get to send arbitrary file paths.
+
+`delivery` controls whether the outgoing text/media is attached to the triggering message or sent as an ordinary group message:
+
+- `reply`: default; attach the first text chunk or captioned/media-only send to the triggering message.
+- `standalone`: send text/media without `reply_to_message_id`.
 
 Because Hermes runs inside this profile, it still has the configured OpenRouter model and enabled tools. Telegram transport is no longer handled by Hermes.
 

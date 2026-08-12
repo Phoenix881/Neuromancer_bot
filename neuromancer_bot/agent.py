@@ -33,6 +33,7 @@ class TriggerMessage:
 class AgentReply:
     reply_text: str
     media_id: str | None = None
+    delivery: str = "reply"
 
 
 class HermesAgent:
@@ -101,9 +102,7 @@ def build_prompt(
     members = "\n".join(format_member(member) for member in context.members)
     recent = "\n".join(format_recent_message(message) for message in context.recent_messages)
 
-    return f"""You are Neuromancer replying inside one private Telegram group chat.
-
-SOUL.md is part of your identity in this Hermes profile. Follow it.
+    return f"""SOUL.md is part of your identity in this Hermes profile. Follow it.
 
 Runtime boundary:
 - The standalone Python Telegram bot already wrote the incoming message into SQLite.
@@ -111,11 +110,16 @@ Runtime boundary:
 - Group and friend descriptions are manually owned by Karim.
 - Use tools when they genuinely help answer the user.
 - Return only a valid JSON object. No transcript, no code fence wrapper.
-- JSON schema: {{"reply_text":"telegram reply text","media_id":null}}
+- JSON schema: {{"reply_text":"telegram reply text","media_id":null,"delivery":"reply"}}
 - If a fixed media reaction fits unusually well, set media_id to one listed below.
 - If no media is needed, set media_id to null.
 - Do not invent media ids or file paths.
 - Keep media rare and intentional; these are sharp reaction images, not decoration.
+- delivery must be "reply" or "standalone".
+- Use delivery="reply" when directly answering the triggering message.
+- Use delivery="standalone" for ambient group-chat remarks, standalone reactions, or when attaching the reply visually to the trigger would feel awkward.
+- Default to delivery="reply" unless standalone clearly fits better.
+- Default to delivery="standalone" if asked to say/send something that is meant for other person, in that case tag them with their username
 
 Available fixed media reactions:
 {media_library.prompt_summary()}
@@ -147,7 +151,7 @@ Reply as Neuromancer now."""
 def parse_agent_reply(raw: str, media_library: MediaLibrary) -> AgentReply:
     data = parse_json_object(raw)
     if not isinstance(data, dict):
-        return AgentReply(reply_text=raw.strip(), media_id=None)
+        return AgentReply(reply_text=raw.strip(), media_id=None, delivery="reply")
 
     reply_text = data.get("reply_text", data.get("reply", ""))
     if reply_text is None:
@@ -161,9 +165,13 @@ def parse_agent_reply(raw: str, media_library: MediaLibrary) -> AgentReply:
     if media_id and not media_library.has(media_id):
         media_id = None
 
+    delivery = str(data.get("delivery", "reply")).strip().casefold()
+    if delivery not in {"reply", "standalone"}:
+        delivery = "reply"
+
     if not reply_text and not media_id:
-        return AgentReply(reply_text=raw.strip(), media_id=None)
-    return AgentReply(reply_text=reply_text, media_id=media_id)
+        return AgentReply(reply_text=raw.strip(), media_id=None, delivery="reply")
+    return AgentReply(reply_text=reply_text, media_id=media_id, delivery=delivery)
 
 
 def parse_json_object(raw: str) -> object | None:

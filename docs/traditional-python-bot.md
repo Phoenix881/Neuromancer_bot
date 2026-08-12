@@ -9,8 +9,10 @@ This runtime makes Python the only Telegram owner:
 5. If it triggers Neuromancer, the bot builds a compact DB context.
 6. The fixed media index is included as optional reaction context.
 7. Hermes is invoked with `hermes -z` as the agent/model/tool runtime.
-8. Hermes returns `{"reply_text":"...","media_id":null}`.
+8. Hermes returns `{"reply_text":"...","media_id":null,"delivery":"reply"}`.
 9. Python validates any `media_id`, sends text/media, and writes the outgoing result back to SQLite.
+
+`delivery` can be `reply` or `standalone`. Missing/invalid values default to `reply`.
 
 Triggers are intentionally strict:
 

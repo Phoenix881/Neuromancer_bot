@@ -317,20 +317,27 @@ class NeuromancerTelegramRuntime:
             await self.send_and_record_media_reply(trigger_message, context, reply, asset)
             return
 
-        await self.send_and_record_text_reply(trigger_message, context, reply.reply_text)
+        await self.send_and_record_text_reply(
+            trigger_message,
+            context,
+            reply.reply_text,
+            delivery=reply.delivery,
+        )
 
     async def send_and_record_text_reply(
         self,
         trigger_message: Message,
         context: ContextTypes.DEFAULT_TYPE,
         reply_text: str,
+        *,
+        delivery: str = "reply",
     ) -> bool:
         chunks = split_text_for_telegram(reply_text, self.settings.max_telegram_chars)
         if not chunks:
             return False
 
         for index, chunk in enumerate(chunks):
-            if index == 0:
+            if delivery == "reply" and index == 0:
                 sent = await trigger_message.reply_text(
                     chunk,
                     disable_web_page_preview=True,
@@ -368,10 +375,15 @@ class NeuromancerTelegramRuntime:
         caption = text if text and can_caption(asset) and len(text) <= TELEGRAM_CAPTION_LIMIT else None
 
         if text and caption is None and asset.send_mode != "media_only":
-            await self.send_and_record_text_reply(trigger_message, context, text)
+            await self.send_and_record_text_reply(
+                trigger_message,
+                context,
+                text,
+                delivery=reply.delivery,
+            )
             media_reply_to = None
         else:
-            media_reply_to = str(trigger_message.message_id)
+            media_reply_to = str(trigger_message.message_id) if reply.delivery == "reply" else None
 
         sent = await self.send_media_asset(
             context,
