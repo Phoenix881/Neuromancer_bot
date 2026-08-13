@@ -13,10 +13,11 @@ The important split:
 ```text
 Telegram group message
   -> neuromancer_bot.telegram_app
+  -> decide whether the original Telegram message should trigger Neuromancer
   -> write incoming message to neuromancer_memory.db
   -> download/analyze Telegram images with OpenRouter vision, when present
-  -> decide whether Neuromancer should reply
-  -> build compact context from SQLite
+  -> download/transcribe Telegram voice/audio/video-note messages, when present
+  -> if triggered, build compact context from SQLite
   -> call Hermes with hermes -z
   -> send Telegram reply
   -> write outgoing Neuromancer message to SQLite
@@ -33,6 +34,7 @@ Python is the only intended Telegram consumer. The Hermes Telegram gateway shoul
 - `neuromancer_bot/agent.py`: Hermes one-shot subprocess caller and prompt/context builder.
 - `neuromancer_bot/media_library.py`: fixed media manifest loader and validator.
 - `neuromancer_bot/vision.py`: OpenRouter vision preprocessing for incoming Telegram images.
+- `neuromancer_bot/transcription.py`: local `faster-whisper` transcription and `ffmpeg` audio extraction helpers.
 - `neuromancer_bot/config.py`: Runtime settings loaded from environment and `.env`.
 - `bin/neuromancer-bot`: Convenience launcher for the Python bot.
 - `media/index.json`: curated fixed media reactions Hermes may choose by id.
@@ -55,6 +57,7 @@ Core tables:
 - `member_aliases`: aliases for each known member.
 - `messages_raw`: raw Telegram message log, including timestamps, sender snapshots, message type, reply target, trigger flag, and raw Telegram payload.
 - `message_attachments`: incoming image metadata, local paths, hashes, vision summaries, OCR, and raw vision JSON.
+- `message_transcriptions`: incoming voice/audio/video-note metadata, transcription status, transcript text, and raw transcription JSON.
 - `media_sends`: outgoing fixed-media send log, keyed by Telegram message id.
 - `messages_fts`: full-text index over raw message text and sender snapshots.
 
@@ -68,6 +71,8 @@ Live-owned fields:
 
 - new `messages_raw` rows
 - new `message_attachments` rows for downloaded Telegram images
+- new `message_transcriptions` rows for voice/audio/video-note messages
+- enriched `messages_raw.text` values for transcribed voice/audio/video-note messages
 - `members.username` when it was previously missing
 - `members.is_bot` when Telegram confirms a bot
 - `members.first_seen_at`
@@ -119,6 +124,7 @@ The constructed prompt includes:
 - active speaker profile
 - recent messages, oldest to newest
 - vision summaries/OCR for recent image attachments
+- audio/video-note transcripts already stored as `[audio transcript] ...` or `[video-note transcript] ...`
 - the triggering message
 - compact fixed media options from `media/index.json`
 
@@ -165,13 +171,13 @@ python3 scripts/extract_web_context.py https://example.com
 
 ## Incoming Vision
 
-When a Telegram message contains a photo or image document, Python downloads the image under:
+When a Telegram message contains a photo or image document, Python temporarily downloads the image under:
 
 ```text
 media/incoming/YYYY/MM/
 ```
 
-That directory is ignored by git because it contains private chat artifacts.
+That directory is ignored by git because it can contain private chat artifacts.
 
 For each downloaded image, Python calls OpenRouter directly as a sensory preprocessing step. The default vision model is read from `config.yaml`:
 
@@ -193,6 +199,39 @@ The vision result is stored in `message_attachments`:
 - raw structured vision JSON
 
 If an image message triggers Neuromancer, the vision step runs before the Hermes reply, so Hermes sees the summary and OCR in recent context. Non-triggering images are still stored and analyzed for future memory.
+
+By default, local incoming media files are deleted after the vision attempt to keep VPS disk usage low. The database keeps Telegram file ids, hashes, dimensions, status, summaries/OCR, and errors. Set this only if you want a local archive for re-running vision later:
+
+```env
+NEUROMANCER_KEEP_INCOMING_MEDIA=true
+```
+
+## Incoming Audio
+
+When a Telegram message contains a voice message, audio file, or video note, Python records the original Telegram message first, then tries to transcribe it.
+
+By default this uses local `faster-whisper` with model `small`, `cpu`, and `int8` compute. The first transcription on a fresh machine may take longer because the model has to be downloaded and cached.
+
+Stored message text is enriched in `messages_raw.text`:
+
+```text
+[audio transcript] transcribed voice or audio text
+[video-note transcript] transcribed round-video audio text
+```
+
+Audio-file captions are preserved under a `[caption]` line after the transcript. Because the same `messages_raw` row is updated, transcripts automatically appear in recent context and in `messages_fts` search.
+
+Video notes are downloaded as Telegram video files, then converted to `.mp3` through `ffmpeg` before transcription. Voice/audio files are sent directly to local `faster-whisper` when their extension is already supported; unknown formats are normalized through `ffmpeg`.
+
+Trigger behavior is intentionally simple: Neuromancer decides whether to reply before transcription. A voice or video-note message will trigger only if the original Telegram message was a reply to Neuromancer. A spoken mention inside audio is remembered after transcription, but does not wake the bot yet.
+
+By default, downloaded audio/video-note files and converted `.mp3` files are deleted after processing. The database keeps Telegram file ids, hashes, durations, transcript text, statuses, raw transcription JSON, and any error.
+
+Required system package for video notes and unknown audio formats:
+
+```bash
+ffmpeg
+```
 
 ## Fixed Media
 
@@ -221,6 +260,14 @@ From this directory:
 ./bin/neuromancer-bot
 ```
 
+Install Python dependencies into the same Python environment that runs the bot:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+If your runtime Python is managed by `uv` or a service-specific venv, install `requirements.txt` into that exact interpreter.
+
 Equivalent explicit command:
 
 ```bash
@@ -242,12 +289,27 @@ Useful optional environment:
 - `NEUROMANCER_HERMES_PROVIDER`: optional provider override.
 - `NEUROMANCER_HERMES_REASONING`: optional reasoning override.
 - `NEUROMANCER_MEDIA_INDEX_PATH`: optional path to the fixed media manifest.
-- `NEUROMANCER_INCOMING_MEDIA_DIR`: optional path for downloaded incoming images.
+- `NEUROMANCER_INCOMING_MEDIA_DIR`: optional path for downloaded incoming media.
 - `NEUROMANCER_VISION_ENABLED`: defaults to true.
 - `NEUROMANCER_VISION_PROVIDER`: defaults to `config.yaml` auxiliary vision provider.
 - `NEUROMANCER_VISION_MODEL`: defaults to `config.yaml` auxiliary vision model.
 - `NEUROMANCER_VISION_BASE_URL`: defaults to OpenRouter chat completions.
 - `NEUROMANCER_VISION_TIMEOUT`: defaults to `60`.
+- `NEUROMANCER_TRANSCRIPTION_ENABLED`: defaults to true.
+- `NEUROMANCER_TRANSCRIPTION_PROVIDER`: defaults to `faster-whisper`.
+- `NEUROMANCER_TRANSCRIPTION_MODEL`: defaults to `small`.
+- `NEUROMANCER_TRANSCRIPTION_DEVICE`: defaults to `cpu`.
+- `NEUROMANCER_TRANSCRIPTION_COMPUTE_TYPE`: defaults to `int8`.
+- `NEUROMANCER_TRANSCRIPTION_CPU_THREADS`: defaults to `0`, letting faster-whisper choose.
+- `NEUROMANCER_TRANSCRIPTION_BEAM_SIZE`: defaults to `5`.
+- `NEUROMANCER_TRANSCRIPTION_LANGUAGE`: optional language hint like `ru`; unset means auto-detect.
+- `NEUROMANCER_TRANSCRIPTION_BASE_URL`: only used when `NEUROMANCER_TRANSCRIPTION_PROVIDER=openai`.
+- `NEUROMANCER_TRANSCRIPTION_TIMEOUT`: defaults to `90`.
+- `NEUROMANCER_TRANSCRIPTION_MAX_SECONDS`: defaults to `300`.
+- `NEUROMANCER_TRANSCRIPTION_MAX_BYTES`: defaults to `25000000`.
+- `NEUROMANCER_FFMPEG_COMMAND`: defaults to `ffmpeg`.
+- `NEUROMANCER_FFMPEG_TIMEOUT`: defaults to `60`.
+- `NEUROMANCER_KEEP_INCOMING_MEDIA`: defaults to false; deletes downloaded incoming media after vision/transcription processing.
 - `NEUROMANCER_RESPOND_TO_BOTS`: defaults to false.
 - `NEUROMANCER_LOG_LEVEL`: defaults to `INFO`.
 

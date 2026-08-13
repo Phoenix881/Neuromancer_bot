@@ -27,6 +27,15 @@ from .memory import (
     to_iso,
     user_from_message,
 )
+from .transcription import (
+    FasterWhisperTranscriber,
+    OpenAIWhisperTranscriber,
+    TranscriptionError,
+    convert_to_mp3,
+    needs_mp3_conversion,
+    transcription_display_text,
+    transcription_skip_text,
+)
 from .vision import OpenRouterVisionClient, VisionError
 
 
@@ -46,6 +55,18 @@ class IncomingImage:
     file_size: int | None
 
 
+@dataclass(frozen=True)
+class IncomingAudio:
+    file_id: str
+    file_unique_id: str | None
+    media_type: str
+    mime_type: str
+    extension: str
+    duration_seconds: int | None
+    file_size: int | None
+    caption: str | None
+
+
 class NeuromancerTelegramRuntime:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -57,6 +78,7 @@ class NeuromancerTelegramRuntime:
             base_url=settings.vision_base_url,
             timeout_seconds=settings.vision_timeout_seconds,
         )
+        self.transcriber = build_transcriber(settings)
         self.reply_lock = asyncio.Lock()
         self.bot_user_id: str | None = None
         self.bot_username: str | None = None
@@ -99,6 +121,7 @@ class NeuromancerTelegramRuntime:
             was_trigger=was_trigger,
         )
         await self.process_incoming_images(message, context, message_raw_id)
+        transcribed_text = await self.process_incoming_audio(message, context, message_raw_id)
 
         if not was_trigger:
             return
@@ -107,7 +130,11 @@ class NeuromancerTelegramRuntime:
             return
 
         async with self.reply_lock:
-            await self.reply_to_trigger(message, context)
+            await self.reply_to_trigger(
+                message,
+                context,
+                trigger_text_override=transcribed_text,
+            )
 
     async def process_incoming_images(
         self,
@@ -124,6 +151,7 @@ class NeuromancerTelegramRuntime:
 
         for image in images:
             attachment_id: int | None = None
+            path: Path | None = None
             try:
                 path = await self.download_incoming_image(message, context, image)
                 sha256 = file_sha256(path)
@@ -152,6 +180,11 @@ class NeuromancerTelegramRuntime:
                         vision_status="failed",
                         error=str(exc),
                     )
+            finally:
+                if path is not None and not self.settings.keep_incoming_media:
+                    deleted = await asyncio.to_thread(delete_file_quietly, path)
+                    if deleted and attachment_id is not None:
+                        self.memory.clear_attachment_local_path(attachment_id=attachment_id)
 
     async def download_incoming_image(
         self,
@@ -207,6 +240,209 @@ class NeuromancerTelegramRuntime:
             vision_json=result.raw_json,
         )
 
+    async def process_incoming_audio(
+        self,
+        message: Message,
+        context: ContextTypes.DEFAULT_TYPE,
+        message_raw_id: int | None,
+    ) -> str | None:
+        if message_raw_id is None:
+            return None
+
+        audio_items = incoming_audio_from_message(message)
+        if not audio_items:
+            return None
+
+        transcribed_text: str | None = None
+        for audio in audio_items:
+            current_text = await self.process_one_audio_message(
+                message,
+                context,
+                message_raw_id,
+                audio,
+            )
+            if current_text:
+                transcribed_text = current_text
+        return transcribed_text
+
+    async def process_one_audio_message(
+        self,
+        message: Message,
+        context: ContextTypes.DEFAULT_TYPE,
+        message_raw_id: int,
+        audio: IncomingAudio,
+    ) -> str | None:
+        transcription_id = self.memory.record_transcription(
+            message_raw_id=message_raw_id,
+            telegram_file_id=audio.file_id,
+            telegram_file_unique_id=audio.file_unique_id,
+            media_type=audio.media_type,
+            local_path=None,
+            converted_path=None,
+            mime_type=audio.mime_type,
+            duration_seconds=audio.duration_seconds,
+            file_size=audio.file_size,
+            sha256=None,
+            provider=self.settings.transcription_provider,
+            model=self.settings.transcription_model,
+            transcription_status="pending",
+        )
+
+        skip_reason = self.transcription_skip_reason(audio)
+        if skip_reason:
+            display_text = transcription_skip_text(
+                media_type=audio.media_type,
+                reason=short_reason(skip_reason),
+                caption=audio.caption,
+            )
+            self.memory.update_transcription(
+                transcription_id=transcription_id,
+                transcription_status="skipped",
+                error=skip_reason,
+            )
+            self.memory.update_message_text(
+                message_raw_id=message_raw_id,
+                text=display_text,
+                message_type=audio.media_type,
+            )
+            return display_text
+
+        original_path: Path | None = None
+        converted_path: Path | None = None
+        try:
+            original_path = await self.download_incoming_audio(message, context, audio)
+            sha256 = file_sha256(original_path)
+            transcription_id = self.memory.record_transcription(
+                message_raw_id=message_raw_id,
+                telegram_file_id=audio.file_id,
+                telegram_file_unique_id=audio.file_unique_id,
+                media_type=audio.media_type,
+                local_path=str(original_path),
+                converted_path=None,
+                mime_type=audio.mime_type,
+                duration_seconds=audio.duration_seconds,
+                file_size=audio.file_size or original_path.stat().st_size,
+                sha256=sha256,
+                provider=self.settings.transcription_provider,
+                model=self.settings.transcription_model,
+                transcription_status="running",
+            )
+
+            source_path = original_path
+            if needs_mp3_conversion(original_path, media_type=audio.media_type):
+                converted_path = original_path.with_suffix(".mp3")
+                source_path = await asyncio.to_thread(
+                    convert_to_mp3,
+                    source_path=original_path,
+                    target_path=converted_path,
+                    ffmpeg_command=self.settings.ffmpeg_command,
+                    timeout_seconds=self.settings.ffmpeg_timeout_seconds,
+                )
+                self.memory.update_transcription(
+                    transcription_id=transcription_id,
+                    transcription_status="running",
+                    converted_path=str(converted_path),
+                )
+
+            result = await asyncio.to_thread(self.transcriber.transcribe, source_path)
+            display_text = transcription_display_text(
+                media_type=audio.media_type,
+                transcript=result.text,
+                caption=audio.caption,
+            )
+            self.memory.update_transcription(
+                transcription_id=transcription_id,
+                transcription_status="complete",
+                transcript=result.text,
+                language=result.language,
+                transcription_json=result.raw_json,
+                converted_path=str(converted_path) if converted_path else None,
+            )
+            self.memory.update_message_text(
+                message_raw_id=message_raw_id,
+                text=display_text,
+                message_type=audio.media_type,
+            )
+            return display_text
+        except Exception as exc:
+            LOGGER.exception(
+                "Failed to transcribe Telegram %s for message %s",
+                audio.media_type,
+                message.message_id,
+            )
+            display_text = transcription_skip_text(
+                media_type=audio.media_type,
+                reason="failed",
+                caption=audio.caption,
+            )
+            self.memory.update_transcription(
+                transcription_id=transcription_id,
+                transcription_status="failed",
+                error=str(exc),
+                converted_path=str(converted_path) if converted_path else None,
+            )
+            self.memory.update_message_text(
+                message_raw_id=message_raw_id,
+                text=display_text,
+                message_type=audio.media_type,
+            )
+            return display_text
+        finally:
+            if not self.settings.keep_incoming_media:
+                deleted_any = False
+                for path in (original_path, converted_path):
+                    if path is None:
+                        continue
+                    deleted = await asyncio.to_thread(delete_file_quietly, path)
+                    deleted_any = deleted_any or deleted
+                if deleted_any:
+                    self.memory.clear_transcription_local_paths(
+                        transcription_id=transcription_id,
+                    )
+
+    def transcription_skip_reason(self, audio: IncomingAudio) -> str | None:
+        if not self.settings.transcription_enabled:
+            return "transcription disabled"
+        if self.settings.transcription_provider not in {"faster-whisper", "openai"}:
+            return f"unsupported transcription provider: {self.settings.transcription_provider}"
+        if (
+            audio.duration_seconds is not None
+            and audio.duration_seconds > self.settings.transcription_max_seconds
+        ):
+            return (
+                f"duration {audio.duration_seconds}s exceeds "
+                f"{self.settings.transcription_max_seconds}s limit"
+            )
+        if audio.file_size is not None and audio.file_size > self.settings.transcription_max_bytes:
+            return (
+                f"file size {audio.file_size} bytes exceeds "
+                f"{self.settings.transcription_max_bytes} byte limit"
+            )
+        return None
+
+    async def download_incoming_audio(
+        self,
+        message: Message,
+        context: ContextTypes.DEFAULT_TYPE,
+        audio: IncomingAudio,
+    ) -> Path:
+        sent_at = message.date
+        year = f"{sent_at.year:04d}" if sent_at else "unknown"
+        month = f"{sent_at.month:02d}" if sent_at else "unknown"
+        directory = self.settings.incoming_media_dir / year / month / "audio"
+        directory.mkdir(parents=True, exist_ok=True)
+        unique = sanitize_path_part(audio.file_unique_id or audio.file_id)
+        filename = f"{message.chat_id}_{message.message_id}_{unique}{audio.extension}"
+        path = directory / filename
+        telegram_file = await context.bot.get_file(audio.file_id)
+        await telegram_file.download_to_drive(custom_path=str(path))
+        if path.stat().st_size > self.settings.transcription_max_bytes:
+            raise TranscriptionError(
+                f"downloaded file size {path.stat().st_size} bytes exceeds "
+                f"{self.settings.transcription_max_bytes} byte limit"
+            )
+        return path
+
     def should_ignore_trigger_from_bot(self, message: Message) -> bool:
         user = message.from_user
         if self.settings.respond_to_bots:
@@ -248,10 +484,14 @@ class NeuromancerTelegramRuntime:
         )
 
     async def reply_to_trigger(
-        self, message: Message, context: ContextTypes.DEFAULT_TYPE
+        self,
+        message: Message,
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        trigger_text_override: str | None = None,
     ) -> None:
         sender_user_id, sender_name, _username, sender_is_bot = user_from_message(message)
-        text = message_text(message)
+        text = trigger_text_override or message_text(message)
         trigger = TriggerMessage(
             chat_id=str(message.chat_id),
             message_id=str(message.message_id),
@@ -458,6 +698,23 @@ def can_caption(asset: MediaAsset) -> bool:
     return asset.type in {"photo", "video", "animation", "document"} and asset.send_mode != "media_only"
 
 
+def build_transcriber(settings: Settings) -> FasterWhisperTranscriber | OpenAIWhisperTranscriber:
+    if settings.transcription_provider == "openai":
+        return OpenAIWhisperTranscriber(
+            model=settings.transcription_model,
+            base_url=settings.transcription_base_url,
+            timeout_seconds=settings.transcription_timeout_seconds,
+        )
+    return FasterWhisperTranscriber(
+        model=settings.transcription_model,
+        device=settings.transcription_device,
+        compute_type=settings.transcription_compute_type,
+        cpu_threads=settings.transcription_cpu_threads,
+        beam_size=settings.transcription_beam_size,
+        language=settings.transcription_language,
+    )
+
+
 def incoming_images_from_message(message: Message) -> list[IncomingImage]:
     photos = getattr(message, "photo", None)
     if photos:
@@ -495,6 +752,73 @@ def incoming_images_from_message(message: Message) -> list[IncomingImage]:
     return []
 
 
+def incoming_audio_from_message(message: Message) -> list[IncomingAudio]:
+    voice = getattr(message, "voice", None)
+    if voice:
+        return [
+            IncomingAudio(
+                file_id=voice.file_id,
+                file_unique_id=voice.file_unique_id,
+                media_type="voice",
+                mime_type=getattr(voice, "mime_type", None) or "audio/ogg",
+                extension=".ogg",
+                duration_seconds=getattr(voice, "duration", None),
+                file_size=getattr(voice, "file_size", None),
+                caption=None,
+            )
+        ]
+
+    audio = getattr(message, "audio", None)
+    if audio:
+        mime_type = getattr(audio, "mime_type", None) or "audio/mpeg"
+        extension = extension_for_media(
+            file_name=getattr(audio, "file_name", None),
+            mime_type=mime_type,
+            default=".mp3",
+        )
+        return [
+            IncomingAudio(
+                file_id=audio.file_id,
+                file_unique_id=audio.file_unique_id,
+                media_type="audio",
+                mime_type=mime_type,
+                extension=extension,
+                duration_seconds=getattr(audio, "duration", None),
+                file_size=getattr(audio, "file_size", None),
+                caption=getattr(message, "caption", None),
+            )
+        ]
+
+    video_note = getattr(message, "video_note", None)
+    if video_note:
+        return [
+            IncomingAudio(
+                file_id=video_note.file_id,
+                file_unique_id=video_note.file_unique_id,
+                media_type="video_note",
+                mime_type="video/mp4",
+                extension=".mp4",
+                duration_seconds=getattr(video_note, "duration", None),
+                file_size=getattr(video_note, "file_size", None),
+                caption=None,
+            )
+        ]
+
+    return []
+
+
+def extension_for_media(*, file_name: str | None, mime_type: str | None, default: str) -> str:
+    suffix = Path(file_name or "").suffix
+    if suffix:
+        clean_suffix = re.sub(r"[^A-Za-z0-9.]+", "", suffix)
+        if clean_suffix.startswith(".") and len(clean_suffix) <= 16:
+            return clean_suffix
+    guessed = mimetypes.guess_extension(mime_type or "")
+    if guessed:
+        return guessed
+    return default
+
+
 def sanitize_path_part(value: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
     return sanitized[:120] or "file"
@@ -506,6 +830,22 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def delete_file_quietly(path: Path) -> bool:
+    try:
+        path.unlink(missing_ok=True)
+        return True
+    except OSError:
+        LOGGER.warning("Failed to delete incoming media file %s", path, exc_info=True)
+        return False
+
+
+def short_reason(value: str, limit: int = 120) -> str:
+    clean = " ".join(value.strip().split())
+    if len(clean) <= limit:
+        return clean
+    return clean[: max(0, limit - 3)].rstrip() + "..."
 
 
 async def wait_quietly(task: asyncio.Task[Any]) -> None:

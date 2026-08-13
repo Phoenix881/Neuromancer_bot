@@ -21,7 +21,7 @@ MEMORY_SEARCH_SCHEMA = {
     "name": "neuromancer_memory_search",
     "description": (
         "Read-only search in Neuromancer's Telegram message database. Use for old chat quotes, "
-        "exact words/phrases, FTS terms, Telegram message ids, raw DB ids, or recent messages by user id. "
+        "transcribed voice/audio/video-note text, exact words/phrases, FTS terms, Telegram message ids, raw DB ids, or recent messages by user id. "
         "Does not modify memory or member/group profiles."
     ),
     "parameters": {
@@ -71,7 +71,7 @@ MESSAGE_CONTEXT_SCHEMA = {
     "name": "neuromancer_message_context",
     "description": (
         "Read-only lookup of one message plus nearby messages from Neuromancer's SQLite memory. "
-        "Use after neuromancer_memory_search finds a candidate, or when the user gives a Telegram/raw message id."
+        "Includes safe image and transcription metadata when present. Use after neuromancer_memory_search finds a candidate, or when the user gives a Telegram/raw message id."
     ),
     "parameters": {
         "type": "object",

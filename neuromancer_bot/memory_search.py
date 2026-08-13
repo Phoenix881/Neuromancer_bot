@@ -102,14 +102,21 @@ def search_messages(
             )
             used_mode = "exact"
 
-        attachments = load_attachments_for_rows(conn, [int(row["id"]) for row in rows])
+        row_ids = [int(row["id"]) for row in rows]
+        attachments = load_attachments_for_rows(conn, row_ids)
+        transcriptions = load_transcriptions_for_rows(conn, row_ids)
         return {
             "ok": True,
             "mode": used_mode,
             "query": query,
             "count": len(rows),
             "results": [
-                row_to_message(row, attachments.get(int(row["id"]), []), max_text_chars=safe_text_chars)
+                row_to_message(
+                    row,
+                    attachments.get(int(row["id"]), []),
+                    transcriptions.get(int(row["id"]), []),
+                    max_text_chars=safe_text_chars,
+                )
                 for row in rows
             ],
         }
@@ -151,14 +158,26 @@ def lookup_message(
             }
 
         context_rows = surrounding_rows(conn, center, target_chat_id, safe_window)
-        attachments = load_attachments_for_rows(conn, [int(row["id"]) for row in context_rows])
+        row_ids = [int(row["id"]) for row in context_rows]
+        attachments = load_attachments_for_rows(conn, row_ids)
+        transcriptions = load_transcriptions_for_rows(conn, row_ids)
         messages = [
-            row_to_message(row, attachments.get(int(row["id"]), []), max_text_chars=safe_text_chars)
+            row_to_message(
+                row,
+                attachments.get(int(row["id"]), []),
+                transcriptions.get(int(row["id"]), []),
+                max_text_chars=safe_text_chars,
+            )
             for row in context_rows
         ]
         center_message = next(
             (message for message in messages if message["raw_id"] == int(center["id"])),
-            row_to_message(center, attachments.get(int(center["id"]), []), max_text_chars=safe_text_chars),
+            row_to_message(
+                center,
+                attachments.get(int(center["id"]), []),
+                transcriptions.get(int(center["id"]), []),
+                max_text_chars=safe_text_chars,
+            ),
         )
         return {
             "ok": True,
@@ -403,9 +422,50 @@ def load_attachments_for_rows(
     return grouped
 
 
+def load_transcriptions_for_rows(
+    conn: sqlite3.Connection,
+    raw_ids: list[int],
+) -> dict[int, list[dict[str, Any]]]:
+    if not raw_ids:
+        return {}
+    placeholders = ",".join("?" for _ in raw_ids)
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT
+              message_raw_id,
+              media_type,
+              duration_seconds,
+              transcription_status,
+              transcript,
+              language
+            FROM message_transcriptions
+            WHERE message_raw_id IN ({placeholders})
+            ORDER BY id ASC
+            """,
+            raw_ids,
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(int(row["message_raw_id"]), []).append(
+            {
+                "media_type": row["media_type"],
+                "duration_seconds": row["duration_seconds"],
+                "status": row["transcription_status"],
+                "transcript": clamp_text(row["transcript"] or "", 900),
+                "language": row["language"],
+            }
+        )
+    return grouped
+
+
 def row_to_message(
     row: sqlite3.Row,
     attachments: list[dict[str, Any]],
+    transcriptions: list[dict[str, Any]],
     *,
     max_text_chars: int,
 ) -> dict[str, Any]:
@@ -422,6 +482,7 @@ def row_to_message(
         "is_neuromancer_message": bool(row["is_neuromancer_message"]),
         "was_trigger": bool(row["was_trigger"]),
         "attachments": attachments,
+        "transcriptions": transcriptions,
     }
 
 

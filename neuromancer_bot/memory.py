@@ -176,6 +176,47 @@ class SQLiteMemory:
             """
         )
 
+    def ensure_transcription_tables(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS message_transcriptions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              message_raw_id INTEGER NOT NULL REFERENCES messages_raw(id) ON DELETE CASCADE,
+              telegram_file_id TEXT NOT NULL,
+              telegram_file_unique_id TEXT,
+              media_type TEXT NOT NULL,
+              local_path TEXT,
+              converted_path TEXT,
+              mime_type TEXT,
+              duration_seconds INTEGER,
+              file_size INTEGER,
+              sha256 TEXT,
+              provider TEXT,
+              model TEXT,
+              transcription_status TEXT NOT NULL DEFAULT 'pending',
+              transcript TEXT,
+              language TEXT,
+              transcription_json TEXT,
+              error TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(message_raw_id, telegram_file_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_message_transcriptions_message
+            ON message_transcriptions(message_raw_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_message_transcriptions_status
+            ON message_transcriptions(transcription_status, updated_at DESC)
+            """
+        )
+
     def target_chat_id(self) -> str:
         with self.connect() as conn:
             row = conn.execute("SELECT chat_id FROM group_profile WHERE id = 1").fetchone()
@@ -507,6 +548,183 @@ class SQLiteMemory:
                     attachment_id,
                 ),
             )
+            conn.commit()
+
+    def clear_attachment_local_path(self, *, attachment_id: int) -> None:
+        with self.connect() as conn:
+            self.ensure_attachment_tables(conn)
+            conn.execute(
+                """
+                UPDATE message_attachments
+                SET
+                  local_path = NULL,
+                  updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (attachment_id,),
+            )
+            conn.commit()
+
+    def record_transcription(
+        self,
+        *,
+        message_raw_id: int,
+        telegram_file_id: str,
+        telegram_file_unique_id: str | None,
+        media_type: str,
+        local_path: str | None,
+        converted_path: str | None,
+        mime_type: str | None,
+        duration_seconds: int | None,
+        file_size: int | None,
+        sha256: str | None,
+        provider: str | None,
+        model: str | None,
+        transcription_status: str = "pending",
+    ) -> int:
+        with self.connect() as conn:
+            self.ensure_transcription_tables(conn)
+            conn.execute(
+                """
+                INSERT INTO message_transcriptions (
+                  message_raw_id,
+                  telegram_file_id,
+                  telegram_file_unique_id,
+                  media_type,
+                  local_path,
+                  converted_path,
+                  mime_type,
+                  duration_seconds,
+                  file_size,
+                  sha256,
+                  provider,
+                  model,
+                  transcription_status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(message_raw_id, telegram_file_id) DO UPDATE SET
+                  telegram_file_unique_id = excluded.telegram_file_unique_id,
+                  media_type = excluded.media_type,
+                  local_path = excluded.local_path,
+                  converted_path = excluded.converted_path,
+                  mime_type = excluded.mime_type,
+                  duration_seconds = excluded.duration_seconds,
+                  file_size = excluded.file_size,
+                  sha256 = excluded.sha256,
+                  provider = excluded.provider,
+                  model = excluded.model,
+                  transcription_status = excluded.transcription_status,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    message_raw_id,
+                    telegram_file_id,
+                    telegram_file_unique_id,
+                    media_type,
+                    local_path,
+                    converted_path,
+                    mime_type,
+                    duration_seconds,
+                    file_size,
+                    sha256,
+                    provider,
+                    model,
+                    transcription_status,
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT id
+                FROM message_transcriptions
+                WHERE message_raw_id = ? AND telegram_file_id = ?
+                """,
+                (message_raw_id, telegram_file_id),
+            ).fetchone()
+            conn.commit()
+            if not row:
+                raise RuntimeError("Transcription upsert did not return a row id")
+            return int(row[0])
+
+    def update_transcription(
+        self,
+        *,
+        transcription_id: int,
+        transcription_status: str,
+        transcript: str | None = None,
+        language: str | None = None,
+        transcription_json: str | None = None,
+        error: str | None = None,
+        converted_path: str | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            self.ensure_transcription_tables(conn)
+            conn.execute(
+                """
+                UPDATE message_transcriptions
+                SET
+                  transcription_status = ?,
+                  transcript = ?,
+                  language = ?,
+                  transcription_json = ?,
+                  error = ?,
+                  converted_path = COALESCE(?, converted_path),
+                  updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    transcription_status,
+                    transcript,
+                    language,
+                    transcription_json,
+                    error,
+                    converted_path,
+                    transcription_id,
+                ),
+            )
+            conn.commit()
+
+    def clear_transcription_local_paths(self, *, transcription_id: int) -> None:
+        with self.connect() as conn:
+            self.ensure_transcription_tables(conn)
+            conn.execute(
+                """
+                UPDATE message_transcriptions
+                SET
+                  local_path = NULL,
+                  converted_path = NULL,
+                  updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (transcription_id,),
+            )
+            conn.commit()
+
+    def update_message_text(
+        self,
+        *,
+        message_raw_id: int,
+        text: str,
+        message_type: str | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            if message_type is None:
+                conn.execute(
+                    """
+                    UPDATE messages_raw
+                    SET text = ?
+                    WHERE id = ?
+                    """,
+                    (text, message_raw_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE messages_raw
+                    SET text = ?, message_type = ?
+                    WHERE id = ?
+                    """,
+                    (text, message_type, message_raw_id),
+                )
             conn.commit()
 
     def record_outgoing_message(
@@ -896,12 +1114,16 @@ def media_prefix(message: Any, message_type: str) -> str:
         sticker = getattr(message, "sticker", None)
         emoji = getattr(sticker, "emoji", None) if sticker is not None else None
         return f"[sticker {emoji}]" if emoji else "[sticker]"
-    if message_type in {"photo", "video", "animation", "voice", "video_note", "poll", "contact"}:
+    if message_type == "voice":
+        return "[audio message]"
+    if message_type == "video_note":
+        return "[video-note message]"
+    if message_type in {"photo", "video", "animation", "poll", "contact"}:
         return f"[{message_type}]"
     if message_type == "audio":
         audio = getattr(message, "audio", None)
         name = getattr(audio, "file_name", None) if audio is not None else None
-        return f"[audio: {name}]" if name else "[audio]"
+        return f"[audio message: {name}]" if name else "[audio message]"
     if message_type == "document":
         doc = getattr(message, "document", None)
         name = getattr(doc, "file_name", None) if doc is not None else None

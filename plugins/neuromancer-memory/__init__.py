@@ -276,11 +276,11 @@ def _media_prefix(message: Any, message_type: str) -> str:
     if message_type == "video":
         return "[video]"
     if message_type == "voice":
-        return "[voice]"
+        return "[audio message]"
     if message_type == "audio":
         audio = getattr(message, "audio", None)
         name = getattr(audio, "file_name", None) if audio is not None else None
-        return f"[audio: {name}]" if name else "[audio]"
+        return f"[audio message: {name}]" if name else "[audio message]"
     if message_type == "document":
         doc = getattr(message, "document", None)
         name = getattr(doc, "file_name", None) if doc is not None else None
@@ -678,4 +678,3 @@ def _patch_telegram_adapter() -> None:
 def register(ctx) -> None:
     ctx.register_hook("pre_gateway_dispatch", _on_pre_gateway_dispatch)
     _patch_telegram_adapter()
-

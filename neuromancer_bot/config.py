@@ -15,6 +15,11 @@ DEFAULT_DB_FILENAME = "neuromancer_memory.db"
 DEFAULT_VISION_PROVIDER = "openrouter"
 DEFAULT_VISION_MODEL = "google/gemini-2.5-flash"
 DEFAULT_VISION_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
+DEFAULT_TRANSCRIPTION_PROVIDER = "faster-whisper"
+DEFAULT_TRANSCRIPTION_MODEL = "small"
+DEFAULT_TRANSCRIPTION_BASE_URL = "https://api.openai.com/v1/audio/transcriptions"
+DEFAULT_TRANSCRIPTION_DEVICE = "cpu"
+DEFAULT_TRANSCRIPTION_COMPUTE_TYPE = "int8"
 DEFAULT_COMMAND_TRIGGERS = ("/neuromancer",)
 DEFAULT_MENTION_TRIGGERS = ("kazakh_wintermute_bot",)
 TRUE_VALUES = {"1", "true", "yes", "y", "on"}
@@ -45,6 +50,21 @@ class Settings:
     vision_model: str
     vision_base_url: str
     vision_timeout_seconds: float
+    transcription_enabled: bool
+    transcription_provider: str
+    transcription_model: str
+    transcription_base_url: str
+    transcription_timeout_seconds: float
+    transcription_max_seconds: int
+    transcription_max_bytes: int
+    transcription_device: str
+    transcription_compute_type: str
+    transcription_cpu_threads: int
+    transcription_beam_size: int
+    transcription_language: str | None
+    ffmpeg_command: str
+    ffmpeg_timeout_seconds: float
+    keep_incoming_media: bool
     error_reply: str
     log_level: str
 
@@ -257,6 +277,56 @@ def load_settings() -> Settings:
         ),
         vision_base_url=os.environ.get("NEUROMANCER_VISION_BASE_URL") or DEFAULT_VISION_BASE_URL,
         vision_timeout_seconds=_env_float("NEUROMANCER_VISION_TIMEOUT", 60.0, minimum=5.0),
+        transcription_enabled=_env_bool("NEUROMANCER_TRANSCRIPTION_ENABLED", True),
+        transcription_provider=(
+            os.environ.get("NEUROMANCER_TRANSCRIPTION_PROVIDER")
+            or DEFAULT_TRANSCRIPTION_PROVIDER
+        ).casefold(),
+        transcription_model=(
+            os.environ.get("NEUROMANCER_TRANSCRIPTION_MODEL")
+            or DEFAULT_TRANSCRIPTION_MODEL
+        ),
+        transcription_base_url=(
+            os.environ.get("NEUROMANCER_TRANSCRIPTION_BASE_URL")
+            or DEFAULT_TRANSCRIPTION_BASE_URL
+        ),
+        transcription_timeout_seconds=_env_float(
+            "NEUROMANCER_TRANSCRIPTION_TIMEOUT",
+            90.0,
+            minimum=5.0,
+        ),
+        transcription_max_seconds=_env_int(
+            "NEUROMANCER_TRANSCRIPTION_MAX_SECONDS",
+            300,
+            minimum=1,
+        ),
+        transcription_max_bytes=_env_int(
+            "NEUROMANCER_TRANSCRIPTION_MAX_BYTES",
+            25_000_000,
+            minimum=1_000,
+        ),
+        transcription_device=(
+            os.environ.get("NEUROMANCER_TRANSCRIPTION_DEVICE")
+            or DEFAULT_TRANSCRIPTION_DEVICE
+        ),
+        transcription_compute_type=(
+            os.environ.get("NEUROMANCER_TRANSCRIPTION_COMPUTE_TYPE")
+            or DEFAULT_TRANSCRIPTION_COMPUTE_TYPE
+        ),
+        transcription_cpu_threads=_env_int(
+            "NEUROMANCER_TRANSCRIPTION_CPU_THREADS",
+            0,
+            minimum=0,
+        ),
+        transcription_beam_size=_env_int(
+            "NEUROMANCER_TRANSCRIPTION_BEAM_SIZE",
+            5,
+            minimum=1,
+        ),
+        transcription_language=os.environ.get("NEUROMANCER_TRANSCRIPTION_LANGUAGE") or None,
+        ffmpeg_command=os.environ.get("NEUROMANCER_FFMPEG_COMMAND") or "ffmpeg",
+        ffmpeg_timeout_seconds=_env_float("NEUROMANCER_FFMPEG_TIMEOUT", 60.0, minimum=5.0),
+        keep_incoming_media=_env_bool("NEUROMANCER_KEEP_INCOMING_MEDIA", False),
         error_reply=os.environ.get("NEUROMANCER_ERROR_REPLY")
         or "Hermes choked for a second. I logged it instead of pretending that was wisdom.",
         log_level=os.environ.get("NEUROMANCER_LOG_LEVEL", "INFO").upper(),

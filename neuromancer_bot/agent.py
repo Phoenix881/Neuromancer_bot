@@ -106,6 +106,9 @@ def build_prompt(
 
 Runtime boundary:
 - The standalone Python Telegram bot already wrote the incoming message into SQLite.
+- Incoming voice/audio/video-note messages are transcribed by Python before you are called when transcription succeeds.
+- In recent context and database search results, `[audio transcript] ...` and `[video-note transcript] ...` are real transcripts. Treat them as message text.
+- Do not say you lack STT/audio/transcript access when a transcript is present in the prompt or database search results.
 - Do not use tools to mutate neuromancer_memory.db or the group/member profile tables.
 - Group and friend descriptions are manually owned by Karim.
 - Use tools when they genuinely help answer the user.
